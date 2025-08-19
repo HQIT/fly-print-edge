@@ -2,3 +2,6 @@ gradio>=4.7.0
 zeroconf>=0.131.0
 pandas>=2.0.0
 requests>=2.25.0
+pywin32>=306
+Pillow>=10.0.0
+PyPDF2>=3.0.0

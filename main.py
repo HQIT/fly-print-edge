@@ -2,6 +2,9 @@ import gradio as gr
 import pandas as pd
 import os
 import tempfile
+import threading
+import time
+import platform
 from printer_utils import PrinterManager
 
 
@@ -55,8 +58,8 @@ class PrintApp:
             if found_row is None:
                 return self.refresh_managed_printers()[0], f"❌ 找不到打印机: {printer_name}"
             
-            # 只允许添加本地CUPS打印机
-            if found_row["类型"] != "local":
+            # 在Linux系统中只允许添加本地CUPS打印机
+            if platform.system() == "Linux" and found_row["类型"] != "local":
                 return self.refresh_managed_printers()[0], f"⚠️ 只能添加本地CUPS打印机，网络打印机请先添加到CUPS系统"
             
             # 检查是否已存在
@@ -68,7 +71,7 @@ class PrintApp:
                 "name": found_row["名称"],
                 "type": found_row["类型"], 
                 "location": found_row["位置"],
-                "make_model": found_row["型号"],
+                "make_model": found_row["设备型号"],
                 "enabled": True
             }
             self.printer_manager.config.add_printer(printer_info)
@@ -245,12 +248,54 @@ class PrintApp:
                 print_options
             )
             
-            # 清理临时文件
-            try:
-                os.remove(temp_file_path)
-                print(f"🗑️ [DEBUG] 清理临时文件: {temp_file_path}")
-            except Exception as cleanup_error:
-                print(f"⚠️ [DEBUG] 清理临时文件失败: {cleanup_error}")
+            # 智能清理临时文件，基于打印任务状态
+            def smart_cleanup():
+                try:
+                    # 如果提交失败，立即清理
+                    if not result.get("success", False):
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+                            print(f"🗑️ [DEBUG] 打印失败，立即清理临时文件: {temp_file_path}")
+                        return
+                    
+                    # 如果有job_id，监控任务状态
+                    job_id = result.get("job_id")
+                    if job_id:
+                        max_wait_time = 300  # 最大等待5分钟
+                        check_interval = 5   # 每5秒检查一次
+                        waited_time = 0
+                        
+                        while waited_time < max_wait_time:
+                            time.sleep(check_interval)
+                            waited_time += check_interval
+                            
+                            # 检查任务状态
+                            job_status = self.printer_manager.get_job_status(printer_name, job_id)
+                            
+                            # 如果任务不存在（完成或失败）或状态为完成，清理文件
+                            if not job_status.get("exists", True) or job_status.get("status") in ["completed", "completed_or_failed"]:
+                                if os.path.exists(temp_file_path):
+                                    os.remove(temp_file_path)
+                                    print(f"🗑️ [DEBUG] 打印任务完成，清理临时文件: {temp_file_path}")
+                                return
+                        
+                        # 超时后强制清理
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+                            print(f"🗑️ [DEBUG] 等待超时，强制清理临时文件: {temp_file_path}")
+                    else:
+                        # 没有job_id，使用短延迟后清理
+                        time.sleep(30)
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+                            print(f"🗑️ [DEBUG] 无job_id，延迟清理临时文件: {temp_file_path}")
+                        
+                except Exception as cleanup_error:
+                    print(f"⚠️ [DEBUG] 清理临时文件失败: {cleanup_error}")
+            
+            # 在后台线程中执行智能清理
+            cleanup_thread = threading.Thread(target=smart_cleanup, daemon=True)
+            cleanup_thread.start()
             
             return result
             
@@ -448,7 +493,7 @@ def create_app():
             refresh_discovered_btn = gr.Button("🔄 刷新打印机列表", variant="primary")
             
             discovered_table = gr.Dataframe(
-                headers=["名称", "类型", "状态", "位置", "型号"],
+                headers=["名称", "类型", "位置", "设备型号", "状态"],
                 interactive=False,
                 label="发现的打印机"
             )
