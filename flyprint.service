@@ -1,0 +1,17 @@
+[Unit]
+Description=Fly Print Service
+Documentation=https://github.com/ecnu/fly-print
+After=network.target
+
+[Service]
+Type=simple
+User=ecnu
+WorkingDirectory=/opt/flyprint
+ExecStart=/opt/flyprint/FlyPrint
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

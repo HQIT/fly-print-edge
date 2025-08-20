@@ -2,3 +2,30 @@
 .images
 __pycache__
 config.json
+
+# PyInstaller 构建产物
+build/
+dist/
+
+# 安装包
+flyprint-linux-*.tar.gz
+
+# Python 缓存
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
