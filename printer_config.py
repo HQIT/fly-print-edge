@@ -25,7 +25,22 @@ class PrinterConfig:
                 return config
         except FileNotFoundError:
             print(f"⚠️ [DEBUG] 配置文件不存在，创建默认配置")
-            return {"managed_printers": [], "settings": {}}
+            return {
+                "managed_printers": [], 
+                "settings": {},
+                "cloud": {
+                    "enabled": False,
+                    "base_url": "",
+                    "auth_url": "https://oauth.021hqit.com/keycloak/realms/master/protocol/openid-connect/token",
+                    "client_id": "fly-print-edge",
+                    "client_secret": "",
+                    "node_name": "",
+                    "location": "",
+                    "heartbeat_interval": 30,
+                    "auto_register": True,
+                    "auto_register_printers": True
+                }
+            }
     
     def save_config(self):
         """保存配置文件"""

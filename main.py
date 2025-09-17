@@ -6,6 +6,7 @@ import threading
 import time
 import platform
 from printer_utils import PrinterManager
+from cloud_service import CloudService
 
 
 class PrintApp:
@@ -15,6 +16,14 @@ class PrintApp:
         self.printer_manager = PrinterManager()
         self.selected_discovered_row = None
         self.selected_managed_row = None
+        
+        # 初始化云端服务
+        cloud_config = self.printer_manager.config.config.get("cloud", {})
+        self.cloud_service = CloudService(cloud_config, self.printer_manager)
+        
+        # 如果启用云端服务，自动启动
+        if cloud_config.get("enabled", False):
+            self._start_cloud_service()
     
     def refresh_discovered_printers(self):
         """刷新发现的打印机列表"""
@@ -478,6 +487,84 @@ class PrintApp:
                 
         except Exception as e:
             return pd.DataFrame(columns=["任务ID", "用户", "文件名", "大小", "状态"]), f"❌ 删除任务失败: {str(e)}"
+    
+    # ==================== 云端服务功能 ====================
+    
+    def _start_cloud_service(self):
+        """启动云端服务"""
+        def start_async():
+            try:
+                result = self.cloud_service.start()
+                if result["success"]:
+                    print(f"✅ [DEBUG] 云端服务启动成功: {result.get('node_id', '')}")
+                else:
+                    print(f"❌ [DEBUG] 云端服务启动失败: {result.get('message', '')}")
+            except Exception as e:
+                print(f"❌ [DEBUG] 云端服务启动异常: {e}")
+        
+        # 在后台线程中启动云端服务
+        threading.Thread(target=start_async, daemon=True).start()
+    
+    def get_cloud_status(self):
+        """获取云端服务状态"""
+        try:
+            status = self.cloud_service.get_status()
+            status_text = f"云端服务状态:\n"
+            status_text += f"  启用: {'是' if status['enabled'] else '否'}\n"
+            status_text += f"  已注册: {'是' if status['registered'] else '否'}\n"
+            status_text += f"  节点ID: {status.get('node_id', '未分配')}\n"
+            
+            if status.get('heartbeat'):
+                hb = status['heartbeat']
+                status_text += f"  心跳服务: {'运行中' if hb['running'] else '已停止'}\n"
+                status_text += f"  心跳间隔: {hb['interval']}秒\n"
+                status_text += f"  失败次数: {hb['failures']}/{hb['max_failures']}\n"
+            
+            if status.get('websocket'):
+                ws = status['websocket']
+                status_text += f"  WebSocket: {'已连接' if ws['running'] else '未连接'}\n"
+            
+            return status_text
+        except Exception as e:
+            return f"❌ 获取云端状态失败: {str(e)}"
+    
+    def toggle_cloud_service(self):
+        """切换云端服务状态"""
+        try:
+            cloud_config = self.printer_manager.config.config.get("cloud", {})
+            current_enabled = cloud_config.get("enabled", False)
+            
+            if current_enabled:
+                # 停止云端服务
+                self.cloud_service.stop()
+                cloud_config["enabled"] = False
+                message = "✅ 云端服务已停用"
+            else:
+                # 启动云端服务
+                cloud_config["enabled"] = True
+                self.cloud_service.enabled = True
+                self.cloud_service._initialize_components()
+                self._start_cloud_service()
+                message = "✅ 云端服务已启用"
+            
+            # 保存配置
+            self.printer_manager.config.config["cloud"] = cloud_config
+            self.printer_manager.config.save_config()
+            
+            return message
+        except Exception as e:
+            return f"❌ 切换云端服务失败: {str(e)}"
+    
+    def force_cloud_heartbeat(self):
+        """强制发送云端心跳"""
+        try:
+            result = self.cloud_service.force_heartbeat()
+            if result["success"]:
+                return "✅ 心跳发送成功"
+            else:
+                return f"❌ 心跳发送失败: {result['message']}"
+        except Exception as e:
+            return f"❌ 心跳发送异常: {str(e)}"
 
 
 def create_app():
@@ -628,6 +715,23 @@ def create_app():
             print_btn = gr.Button("🖨️ 开始打印", variant="primary")
             print_result = gr.Textbox(label="打印结果", interactive=False)
         
+        with gr.Tab("☁️ 云端服务"):
+            gr.Markdown("### fly-print-cloud 云端服务管理")
+            
+            with gr.Row():
+                cloud_status_btn = gr.Button("📊 查看状态", variant="secondary")
+                toggle_cloud_btn = gr.Button("🔄 启用/停用", variant="primary")
+                heartbeat_btn = gr.Button("💓 发送心跳", variant="secondary")
+            
+            cloud_status_display = gr.Textbox(
+                label="云端服务状态",
+                lines=10,
+                interactive=False,
+                value="点击'查看状态'获取云端服务信息"
+            )
+            
+            cloud_operation_result = gr.Textbox(label="操作结果", interactive=False)
+        
         # 事件绑定
         def refresh_discovered():
             df, status = app.refresh_discovered_printers()
@@ -762,6 +866,36 @@ def create_app():
             remove_job_and_refresh,
             inputs=[managed_dropdown, remove_job_input],
             outputs=[queue_table, managed_status, remove_job_input]
+        )
+        
+        # ==================== 云端服务事件绑定 ====================
+        
+        # 查看云端状态
+        cloud_status_btn.click(
+            app.get_cloud_status,
+            outputs=[cloud_status_display]
+        )
+        
+        # 启用/停用云端服务
+        def toggle_and_refresh():
+            result = app.toggle_cloud_service()
+            status = app.get_cloud_status()
+            return result, status
+        
+        toggle_cloud_btn.click(
+            toggle_and_refresh,
+            outputs=[cloud_operation_result, cloud_status_display]
+        )
+        
+        # 发送心跳
+        def heartbeat_and_refresh():
+            result = app.force_cloud_heartbeat()
+            status = app.get_cloud_status()
+            return result, status
+        
+        heartbeat_btn.click(
+            heartbeat_and_refresh,
+            outputs=[cloud_operation_result, cloud_status_display]
         )
         
         # 页面加载时刷新数据
