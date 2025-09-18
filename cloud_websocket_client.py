@@ -71,32 +71,32 @@ class CloudWebSocketClient:
                     await asyncio.sleep(self.reconnect_interval)
                     continue
                 
-                headers = {"Authorization": f"Bearer {token}"}
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Connection": "Upgrade",
+                    "Upgrade": "websocket"
+                }
                 
                 async with websockets.connect(
                     self.websocket_url,
-                    extra_headers=headers,
+                    additional_headers=headers,
                     ping_interval=30,
                     ping_timeout=10
                 ) as websocket:
                     self.websocket = websocket
                     print("✅ [DEBUG] WebSocket连接成功")
                     
-                    # 发送连接确认消息
-                    await self._send_message({
-                        "type": "connection_established",
-                        "timestamp": int(time.time())
-                    })
-                    
                     # 监听消息
+                    print("👂 [DEBUG] 开始监听WebSocket消息...")
                     async for message in websocket:
                         try:
+                            print(f"📨 [DEBUG] 收到WebSocket消息: {message}")
                             await self._handle_message(message)
                         except Exception as e:
                             print(f"❌ [DEBUG] 处理WebSocket消息异常: {e}")
                             
-            except websockets.exceptions.ConnectionClosed:
-                print("🔌 [DEBUG] WebSocket连接关闭")
+            except websockets.exceptions.ConnectionClosed as e:
+                print(f"🔌 [DEBUG] WebSocket连接关闭: {e}")
             except Exception as e:
                 print(f"❌ [DEBUG] WebSocket连接异常: {e}")
             
@@ -128,7 +128,7 @@ class CloudWebSocketClient:
     
     async def _send_message(self, data: Dict[str, Any]):
         """发送消息到WebSocket"""
-        if self.websocket and not self.websocket.closed:
+        if self.websocket:
             try:
                 message = json.dumps(data)
                 await self.websocket.send(message)
@@ -138,7 +138,7 @@ class CloudWebSocketClient:
     
     def send_message_sync(self, data: Dict[str, Any]):
         """同步发送消息（在其他线程中调用）"""
-        if self.websocket and not self.websocket.closed:
+        if self.websocket:
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
