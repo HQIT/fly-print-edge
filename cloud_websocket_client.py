@@ -43,8 +43,8 @@ class CloudWebSocketClient:
     def stop(self):
         """停止WebSocket客户端"""
         self.running = False
-        if self.websocket:
-            asyncio.create_task(self.websocket.close())
+        # 不直接关闭WebSocket连接，让异步循环自然结束
+        # WebSocket连接会在_connect_and_listen循环结束时自动关闭
         print("🛑 [DEBUG] WebSocket客户端已停止")
     
     def _run_async_loop(self):

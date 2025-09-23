@@ -356,7 +356,7 @@ class LinuxPrinter:
     def add_network_printer_to_cups(self, printer_info: Dict[str, Any]) -> tuple[bool, str]:
         """自动将网络打印机添加到CUPS系统"""
         try:
-            printer_name = printer_info.get('name', '').replace('[网络] ', '')
+            printer_name = printer_info.get('name', '')
             printer_uri = printer_info.get('uri', '')
             printer_model = printer_info.get('make_model', '')
             printer_location = printer_info.get('location', '网络打印机')

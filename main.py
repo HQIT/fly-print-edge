@@ -59,34 +59,7 @@ class PrintApp:
             # 从选择文本中提取打印机名称 (格式: "名称 (类型)")
             printer_name = selected_printer.split(" (")[0]
             
-            # 检查是否是网络打印机
-            if printer_name.startswith("[网络]"):
-                # 尝试自动添加网络打印机到CUPS
-                network_printer_info = None
-                for _, row in discovered_df.iterrows():
-                    if row["名称"] == printer_name:
-                        network_printer_info = {
-                            'name': row["名称"],
-                            'uri': row.get("URI", ""),  # 需要从发现的打印机中获取URI
-                            'make_model': row["设备型号"],
-                            'location': row["位置"]
-                        }
-                        break
-                
-                if network_printer_info:
-                    success, message = self.printer_manager.add_network_printer_to_cups(network_printer_info)
-                    if success:
-                        # 添加成功后，重新扫描本地打印机并添加到管理列表
-                        # 等待一下让CUPS系统更新
-                        import time
-                        time.sleep(2)
-                        # 继续执行正常的添加流程
-                    else:
-                        return self.refresh_managed_printers()[0], f"❌ 自动添加网络打印机失败: {message}"
-                else:
-                    return self.refresh_managed_printers()[0], "⚠️ 网络打印机需要先手动添加到CUPS系统中才能使用。请参考CUPS管理文档。"
-            
-            # 查找对应的行
+            # 查找对应的打印机信息
             found_row = None
             for _, row in discovered_df.iterrows():
                 if row["名称"] == printer_name:
@@ -96,26 +69,23 @@ class PrintApp:
             if found_row is None:
                 return self.refresh_managed_printers()[0], f"❌ 找不到打印机: {printer_name}"
             
-            # 在Linux系统中只允许添加本地CUPS打印机
-            if platform.system() == "Linux" and found_row["类型"] != "local":
-                return self.refresh_managed_printers()[0], f"⚠️ 只能添加本地CUPS打印机，网络打印机请先添加到CUPS系统"
-            
-            # 检查是否已存在
-            existing_names = [p.get("name", "") for p in self.printer_manager.config.get_managed_printers()]
-            if printer_name in existing_names:
-                return self.refresh_managed_printers()[0], f"⚠️ 打印机 {printer_name} 已经在管理列表中"
-                
+            # 构造打印机信息
             printer_info = {
                 "name": found_row["名称"],
-                "type": found_row["类型"], 
+                "type": found_row["类型"],
                 "location": found_row["位置"],
                 "make_model": found_row["设备型号"],
-                "enabled": True
+                "uri": found_row.get("URI", "")  # 网络打印机需要URI
             }
-            self.printer_manager.config.add_printer(printer_info)
             
-            managed_df, _ = self.refresh_managed_printers()
-            return managed_df, f"✅ 已添加打印机: {printer_name}"
+            # 使用智能添加方法（自动处理网络打印机）
+            success, message = self.printer_manager.add_printer_intelligently(printer_info)
+            
+            if success:
+                managed_df, _ = self.refresh_managed_printers()
+                return managed_df, f"✅ {message}"
+            else:
+                return self.refresh_managed_printers()[0], f"❌ {message}"
         except Exception as e:
             return self.refresh_managed_printers()[0], f"❌ 添加失败: {str(e)}"
     

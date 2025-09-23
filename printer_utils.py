@@ -68,8 +68,6 @@ class PrinterDiscovery:
             print(f"📊 [DEBUG] 发现网络打印机数量: {len(discovered)}")
             
             for printer in discovered:
-                # 添加[网络]前缀以区分网络打印机
-                printer['name'] = f"[网络] {printer['name']}"
                 printers.append(printer)
             
             zeroconf.close()
@@ -298,6 +296,72 @@ class PrinterManager:
         except Exception as e:
             print(f"❌ [DEBUG] 获取端口信息时出错: {e}")
             return ""
+    
+    def add_printer_intelligently(self, printer_info: Dict[str, Any]) -> tuple[bool, str]:
+        """智能添加打印机（自动处理网络打印机）"""
+        try:
+            printer_type = printer_info.get("type", "")
+            printer_name = printer_info.get("name", "")
+            
+            # 如果是网络打印机，先添加到CUPS
+            if printer_type == "network":
+                print(f"🌐 [DEBUG] 检测到网络打印机，自动添加到CUPS: {printer_name}")
+                success, message = self.add_network_printer_to_cups(printer_info)
+                if not success:
+                    return False, f"网络打印机添加到CUPS失败: {message}"
+                
+                # 等待CUPS更新
+                import time
+                time.sleep(2)
+                
+                # 重新发现打印机，获取CUPS中的版本
+                local_printers = self.discovery.discover_local_printers()
+                cups_printer = None
+                for printer in local_printers:
+                    if printer_name in printer.get("name", "") or printer.get("name", "") in printer_name:
+                        cups_printer = printer
+                        break
+                
+                if cups_printer:
+                    # 使用CUPS中的打印机信息
+                    printer_info = cups_printer
+                    print(f"✅ [DEBUG] 找到CUPS中的打印机: {printer_info.get('name')}")
+                else:
+                    return False, "网络打印机添加到CUPS成功，但无法在CUPS中找到对应的打印机"
+            
+            # 检查是否已存在
+            existing_names = [p.get("name", "") for p in self.config.get_managed_printers()]
+            if printer_info.get("name") in existing_names:
+                return False, f"打印机 {printer_info.get('name')} 已经在管理列表中"
+            
+            # 添加到管理列表
+            printer_id = f"printer_{len(self.config.get_managed_printers())}"
+            managed_printer = {
+                "name": printer_info.get("name"),
+                "type": printer_info.get("type", "local"),  # 网络打印机在CUPS中会变成local
+                "location": printer_info.get("location", ""),
+                "make_model": printer_info.get("make_model", ""),
+                "enabled": True,
+                "added_time": self._get_current_time(),
+                "id": printer_id
+            }
+            
+            # 保存配置
+            current_printers = self.config.get_managed_printers()
+            current_printers.append(managed_printer)
+            self.config.config["managed_printers"] = current_printers
+            self.config.save_config()
+            
+            return True, f"打印机 {printer_info.get('name')} 添加成功"
+            
+        except Exception as e:
+            print(f"❌ [DEBUG] 智能添加打印机失败: {e}")
+            return False, f"添加失败: {str(e)}"
+    
+    def _get_current_time(self) -> str:
+        """获取当前时间字符串"""
+        from datetime import datetime
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     def get_print_queue_df(self, printer_name: str) -> pd.DataFrame:
         """获取打印队列DataFrame"""
