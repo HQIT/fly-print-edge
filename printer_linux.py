@@ -329,3 +329,100 @@ class LinuxPrinter:
         except Exception as e:
             print(f"❌ [DEBUG] 删除打印任务时出错: {e}")
             return False, f"删除出错: {str(e)}"
+    
+    def get_printer_port_info(self, printer_name: str) -> str:
+        """获取打印机端口信息"""
+        try:
+            result = run_command_with_debug(['lpstat', '-v', printer_name])
+            if result and result.returncode == 0:
+                # 解析输出: "用于 打印机名 的设备：端口信息"
+                output = result.stdout.strip()
+                if '：' in output:
+                    port_info = output.split('：', 1)[1].strip()
+                    print(f"📡 [DEBUG] 获取端口信息: {printer_name} -> {port_info}")
+                    return port_info
+                elif ':' in output:  # 英文冒号
+                    port_info = output.split(':', 1)[1].strip()
+                    print(f"📡 [DEBUG] 获取端口信息: {printer_name} -> {port_info}")
+                    return port_info
+            
+            print(f"⚠️ [DEBUG] 无法获取打印机 {printer_name} 的端口信息")
+            return ""
+            
+        except Exception as e:
+            print(f"❌ [DEBUG] 获取端口信息时出错: {e}")
+            return ""
+    
+    def add_network_printer_to_cups(self, printer_info: Dict[str, Any]) -> tuple[bool, str]:
+        """自动将网络打印机添加到CUPS系统"""
+        try:
+            printer_name = printer_info.get('name', '').replace('[网络] ', '')
+            printer_uri = printer_info.get('uri', '')
+            printer_model = printer_info.get('make_model', '')
+            printer_location = printer_info.get('location', '网络打印机')
+            
+            if not printer_name or not printer_uri:
+                return False, "缺少必要的打印机信息（名称或URI）"
+            
+            # 生成CUPS友好的打印机名称（去除特殊字符）
+            cups_name = printer_name.replace(' ', '_').replace('-', '_').replace('.', '_')
+            
+            print(f"🖨️ [DEBUG] 自动添加网络打印机到CUPS:")
+            print(f"  名称: {cups_name}")
+            print(f"  URI: {printer_uri}")
+            print(f"  位置: {printer_location}")
+            
+            # 构建lpadmin命令
+            cmd = [
+                'lpadmin',
+                '-p', cups_name,  # 打印机名称
+                '-v', printer_uri,  # 打印机URI
+                '-L', printer_location,  # 位置描述
+                '-E'  # 启用打印机并接受任务
+            ]
+            
+            # 如果有型号信息，尝试设置驱动程序
+            if printer_model and 'IPP' in printer_model.upper():
+                # 对于IPP打印机，使用IPP Everywhere驱动
+                cmd.extend(['-m', 'everywhere'])
+            else:
+                # 使用通用PostScript驱动作为备选
+                cmd.extend(['-m', 'lsb/usr/cupsfilters/generic.ppd'])
+            
+            # 执行添加命令
+            result = run_command_with_debug(cmd, timeout=30)
+            
+            if result and result.returncode == 0:
+                print(f"✅ [DEBUG] 网络打印机添加到CUPS成功")
+                
+                # 确保打印机启用
+                enable_result = run_command_with_debug(['cupsenable', cups_name])
+                accept_result = run_command_with_debug(['cupsaccept', cups_name])
+                
+                return True, f"网络打印机 {printer_name} 已成功添加到CUPS系统 (内部名称: {cups_name})"
+            else:
+                error_msg = result.stderr if result and result.stderr else "未知错误"
+                print(f"❌ [DEBUG] 添加网络打印机失败: {error_msg}")
+                return False, f"添加失败: {error_msg}"
+                
+        except Exception as e:
+            print(f"❌ [DEBUG] 添加网络打印机到CUPS时出错: {e}")
+            return False, f"添加出错: {str(e)}"
+    
+    def remove_printer_from_cups(self, printer_name: str) -> tuple[bool, str]:
+        """从CUPS系统中移除打印机"""
+        try:
+            print(f"🗑️ [DEBUG] 从CUPS移除打印机: {printer_name}")
+            result = run_command_with_debug(['lpadmin', '-x', printer_name])
+            
+            if result and result.returncode == 0:
+                print(f"✅ [DEBUG] 打印机从CUPS移除成功")
+                return True, f"打印机 {printer_name} 已从CUPS系统移除"
+            else:
+                error_msg = result.stderr if result and result.stderr else "未知错误"
+                print(f"❌ [DEBUG] 移除打印机失败: {error_msg}")
+                return False, f"移除失败: {error_msg}"
+                
+        except Exception as e:
+            print(f"❌ [DEBUG] 移除打印机时出错: {e}")
+            return False, f"移除出错: {str(e)}"

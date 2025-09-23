@@ -83,7 +83,7 @@ class CloudAPIClient:
             return {"success": False, "error": str(e)}
     
     def register_printers(self, printers: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """注册打印机到云端"""
+        """注册打印机到云端（逐个注册）"""
         if not self.node_id:
             return {"success": False, "error": "节点未注册"}
         
@@ -91,34 +91,46 @@ class CloudAPIClient:
             url = f"{self.base_url}/api/v1/edge/{self.node_id}/printers"
             headers = self.auth_client.get_auth_headers()
             
-            # 转换打印机数据格式
-            printer_data = []
-            for printer in printers:
-                printer_info = {
-                    "name": printer.get("name", ""),
-                    "type": printer.get("type", "local"),
-                    "location": printer.get("location", ""),
-                    "make_model": printer.get("make_model", ""),
-                    "status": printer.get("status", "unknown"),
-                    "capabilities": printer.get("capabilities", {}),
-                    "enabled": printer.get("enabled", True)
+            print(f"🖨️ [DEBUG] 逐个注册打印机: {url}")
+            print(f"📊 [DEBUG] 打印机数量: {len(printers)}")
+            
+            success_count = 0
+            failed_printers = []
+            
+            # 逐个注册打印机
+            for i, printer in enumerate(printers):
+                print(f"📋 [DEBUG] 注册打印机 {i+1}: {printer['name']}")
+                
+                response = requests.post(url, json=printer, headers=headers, timeout=10)
+                
+                if response.status_code in [200, 201]:
+                    success_count += 1
+                    print(f"✅ [DEBUG] 打印机 {printer['name']} 注册成功")
+                else:
+                    failed_printers.append({
+                        "name": printer['name'],
+                        "error": response.text
+                    })
+                    print(f"❌ [DEBUG] 打印机 {printer['name']} 注册失败: {response.status_code} - {response.text}")
+            
+            if success_count == len(printers):
+                print(f"✅ [DEBUG] 所有打印机注册成功，数量: {success_count}")
+                return {"success": True, "registered_count": success_count}
+            elif success_count > 0:
+                print(f"⚠️ [DEBUG] 部分打印机注册成功: {success_count}/{len(printers)}")
+                return {
+                    "success": True, 
+                    "registered_count": success_count,
+                    "failed_count": len(failed_printers),
+                    "failed_printers": failed_printers
                 }
-                printer_data.append(printer_info)
-            
-            data = {"printers": printer_data}
-            
-            print(f"🖨️ [DEBUG] 注册打印机: {url}")
-            print(f"📊 [DEBUG] 打印机数量: {len(printer_data)}")
-            
-            response = requests.post(url, json=data, headers=headers, timeout=10)
-            
-            if response.status_code == 200 or response.status_code == 201:
-                result = response.json()
-                print(f"✅ [DEBUG] 打印机注册成功")
-                return {"success": True, "data": result}
             else:
-                print(f"❌ [DEBUG] 打印机注册失败: {response.status_code} - {response.text}")
-                return {"success": False, "error": response.text}
+                print(f"❌ [DEBUG] 所有打印机注册失败")
+                return {
+                    "success": False, 
+                    "error": "所有打印机注册失败",
+                    "failed_printers": failed_printers
+                }
                 
         except Exception as e:
             print(f"❌ [DEBUG] 打印机注册异常: {e}")

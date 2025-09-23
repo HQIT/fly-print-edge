@@ -106,13 +106,21 @@ class NetworkPrinterListener(ServiceListener):
                 printer_name = name.replace('._ipp._tcp.local.', '')
                 location = f"{ip_address}:{info.port}" if ip_address and info.port else "网络"
                 
-                print(f"✅ [DEBUG] 网络打印机详情 - 名称: {printer_name}, 位置: {location}")
+                # 构建IPP URI
+                uri = ""
+                if ip_address and info.port:
+                    # 尝试不同的IPP路径
+                    uri = f"ipp://{ip_address}:{info.port}/ipp/print"
+                    # 也可以尝试其他常见路径如: /printers/{printer_name}
+                
+                print(f"✅ [DEBUG] 网络打印机详情 - 名称: {printer_name}, 位置: {location}, URI: {uri}")
                 
                 self.printers.append({
                     "name": printer_name,
                     "type": "network",
                     "location": location,
-                    "make_model": "网络打印机 (需要手动添加到CUPS)",
+                    "make_model": "IPP网络打印机",
+                    "uri": uri,  # 添加URI字段
                     "enabled": False  # 网络打印机需要手动配置
                 })
         except Exception as e:
@@ -155,13 +163,18 @@ class PrinterManager:
         for p in all_printers:
             # 使用实际的打印机状态而不是enabled字段
             actual_status = p.get("status", "未知")
-            df_data.append({
+            row_data = {
                 "名称": p.get("name", ""),
                 "类型": p.get("type", ""),
                 "位置": p.get("location", ""),
                 "设备型号": p.get("make_model", ""),
                 "状态": actual_status
-            })
+            }
+            # 为网络打印机添加URI信息（不显示在表格中）
+            if p.get("uri"):
+                row_data["URI"] = p.get("uri")
+            
+            df_data.append(row_data)
         
         return pd.DataFrame(df_data)
     
@@ -263,6 +276,28 @@ class PrinterManager:
     def remove_print_job(self, printer_name: str, job_id: str) -> tuple[bool, str]:
         """删除特定打印任务"""
         return self.platform_printer.remove_print_job(printer_name, job_id)
+    
+    def add_network_printer_to_cups(self, printer_info: Dict[str, Any]) -> tuple[bool, str]:
+        """自动将网络打印机添加到CUPS系统"""
+        try:
+            if hasattr(self.platform_printer, 'add_network_printer_to_cups'):
+                return self.platform_printer.add_network_printer_to_cups(printer_info)
+            else:
+                return False, "当前平台不支持自动添加网络打印机"
+        except Exception as e:
+            print(f"❌ [DEBUG] 添加网络打印机时出错: {e}")
+            return False, f"添加出错: {str(e)}"
+    
+    def get_printer_port_info(self, printer_name: str) -> str:
+        """获取打印机端口信息"""
+        try:
+            if hasattr(self.platform_printer, 'get_printer_port_info'):
+                return self.platform_printer.get_printer_port_info(printer_name)
+            else:
+                return ""
+        except Exception as e:
+            print(f"❌ [DEBUG] 获取端口信息时出错: {e}")
+            return ""
     
     def get_print_queue_df(self, printer_name: str) -> pd.DataFrame:
         """获取打印队列DataFrame"""

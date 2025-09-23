@@ -146,6 +146,23 @@ class CloudWebSocketClient:
                 loop.close()
             except Exception as e:
                 print(f"❌ [DEBUG] 同步发送WebSocket消息失败: {e}")
+    
+    def send_printer_status(self, node_id: str, printer_id: str, status: str, queue_length: int, error_code: Optional[str] = None):
+        """发送打印机状态消息"""
+        from datetime import datetime, timezone
+        message = {
+            "type": "printer_status",
+            "node_id": node_id,
+            "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            "data": {
+                "printer_id": printer_id,
+                "status": status,
+                "queue_length": queue_length,
+                "error_code": error_code,
+                "supplies": {}
+            }
+        }
+        self.send_message_sync(message)
 
 
 class PrintJobHandler:

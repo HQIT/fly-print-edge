@@ -49,13 +49,42 @@ class PrintApp:
         if not selected_printer:
             return self.refresh_managed_printers()[0], "❌ 请先从下拉菜单选择一台打印机"
         
+        # 添加调试信息
+        print(f"🔍 [DEBUG] 用户选择的打印机: {selected_printer}")
+        print(f"🔍 [DEBUG] 当前发现的打印机数量: {len(discovered_df)}")
+        if len(discovered_df) > 0:
+            print(f"🔍 [DEBUG] 发现的打印机列表: {list(discovered_df['名称'])}")
+        
         try:
             # 从选择文本中提取打印机名称 (格式: "名称 (类型)")
             printer_name = selected_printer.split(" (")[0]
             
             # 检查是否是网络打印机
             if printer_name.startswith("[网络]"):
-                return self.refresh_managed_printers()[0], "⚠️ 网络打印机需要先手动添加到CUPS系统中才能使用。请参考CUPS管理文档。"
+                # 尝试自动添加网络打印机到CUPS
+                network_printer_info = None
+                for _, row in discovered_df.iterrows():
+                    if row["名称"] == printer_name:
+                        network_printer_info = {
+                            'name': row["名称"],
+                            'uri': row.get("URI", ""),  # 需要从发现的打印机中获取URI
+                            'make_model': row["设备型号"],
+                            'location': row["位置"]
+                        }
+                        break
+                
+                if network_printer_info:
+                    success, message = self.printer_manager.add_network_printer_to_cups(network_printer_info)
+                    if success:
+                        # 添加成功后，重新扫描本地打印机并添加到管理列表
+                        # 等待一下让CUPS系统更新
+                        import time
+                        time.sleep(2)
+                        # 继续执行正常的添加流程
+                    else:
+                        return self.refresh_managed_printers()[0], f"❌ 自动添加网络打印机失败: {message}"
+                else:
+                    return self.refresh_managed_printers()[0], "⚠️ 网络打印机需要先手动添加到CUPS系统中才能使用。请参考CUPS管理文档。"
             
             # 查找对应的行
             found_row = None
@@ -736,6 +765,7 @@ def create_app():
         def refresh_discovered():
             df, status = app.refresh_discovered_printers()
             choices = app.get_discovered_printer_choices(df)
+            print(f"🔄 [DEBUG] 刷新发现的打印机，数量: {len(df)}, 选择项: {len(choices)}")
             return df, status, gr.update(choices=choices, value=None)
         
         refresh_discovered_btn.click(
@@ -744,15 +774,46 @@ def create_app():
         )
         
         def add_and_update(discovered_df, selected_printer):
-            managed_df, status = app.add_selected_printer_by_name(discovered_df, selected_printer)
-            printer_names = app.get_printer_names()
-            managed_choices = app.get_managed_printer_choices(managed_df)
-            return managed_df, status, gr.update(choices=printer_names), gr.update(choices=managed_choices, value=None)
+            try:
+                # 验证输入
+                if not selected_printer:
+                    managed_df, _ = app.refresh_managed_printers()
+                    return (managed_df, "❌ 请先选择一台打印机", 
+                           gr.update(), gr.update(), discovered_df, gr.update())
+                
+                # 验证选择的打印机是否在当前列表中
+                current_choices = app.get_discovered_printer_choices(discovered_df)
+                if selected_printer not in current_choices:
+                    print(f"⚠️ [DEBUG] 选择的打印机不在当前列表中: {selected_printer}")
+                    print(f"⚠️ [DEBUG] 当前可用选择: {current_choices}")
+                    # 重新刷新列表
+                    new_discovered_df, _ = app.refresh_discovered_printers()
+                    new_choices = app.get_discovered_printer_choices(new_discovered_df)
+                    managed_df, _ = app.refresh_managed_printers()
+                    return (managed_df, "⚠️ 打印机列表已更新，请重新选择", 
+                           gr.update(), gr.update(),
+                           new_discovered_df, gr.update(choices=new_choices, value=None))
+                
+                managed_df, status = app.add_selected_printer_by_name(discovered_df, selected_printer)
+                printer_names = app.get_printer_names()
+                managed_choices = app.get_managed_printer_choices(managed_df)
+                # 重新获取发现的打印机列表（可能因为网络打印机添加到CUPS而发生变化）
+                new_discovered_df, _ = app.refresh_discovered_printers()
+                discovered_choices = app.get_discovered_printer_choices(new_discovered_df)
+                return (managed_df, status, gr.update(choices=printer_names), 
+                       gr.update(choices=managed_choices, value=None),
+                       new_discovered_df, gr.update(choices=discovered_choices, value=None))
+            except Exception as e:
+                print(f"❌ [DEBUG] add_and_update异常: {e}")
+                managed_df, _ = app.refresh_managed_printers()
+                return (managed_df, f"❌ 操作失败: {str(e)}", 
+                       gr.update(), gr.update(), discovered_df, gr.update())
         
         add_to_managed_btn.click(
             add_and_update,
             inputs=[discovered_table, discovered_dropdown],
-            outputs=[managed_table, discovered_status, printer_dropdown, managed_dropdown]
+            outputs=[managed_table, discovered_status, printer_dropdown, managed_dropdown, 
+                    discovered_table, discovered_dropdown]
         )
         
         def refresh_managed():
