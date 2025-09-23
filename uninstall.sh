@@ -25,7 +25,23 @@ systemctl daemon-reload
 INSTALL_DIR="/opt/flyprint"
 if [ -d "$INSTALL_DIR" ]; then
     echo "删除安装目录: $INSTALL_DIR"
+    echo "  - 删除 Python 虚拟环境..."
+    rm -rf $INSTALL_DIR/.venv
+    echo "  - 删除应用文件..."
     rm -rf $INSTALL_DIR
 fi
 
-echo "卸载完成！"
+# 清理日志文件（可选）
+LOG_DIR="/var/log/flyprint"
+if [ -d "$LOG_DIR" ]; then
+    echo "删除日志目录: $LOG_DIR"
+    rm -rf $LOG_DIR
+fi
+
+echo "✅ 卸载完成！"
+echo ""
+echo "已清理的内容："
+echo "  - systemd 服务 (flyprint.service)"
+echo "  - 应用目录 (/opt/flyprint)"
+echo "  - Python 虚拟环境"
+echo "  - 日志文件 (/var/log/flyprint)"

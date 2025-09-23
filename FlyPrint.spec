@@ -1,6 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -10,21 +9,30 @@ a = Analysis(
         ('printer_*.py', '.'),
         ('printer_config.py', '.'),
         ('printer_utils.py', '.'),
+        ('cloud_*.py', '.'),
+        ('edge_node_info.py', '.'),
     ],
     hiddenimports=[
         'gradio',
         'pandas',
         'zeroconf',
         'requests',
-        'PIL',
-        'PyPDF2',
+        'pywin32',
         'win32api',
         'win32print',
+        'PIL',
+        'PyPDF2',
         'platform',
         'threading',
         'tempfile',
         'time',
-        'os'
+        'os',
+        'psutil',
+        'websockets',
+        'asyncio',
+        'json',
+        'jwt',
+        'logging'
     ],
     hookspath=[],
     hooksconfig={},
