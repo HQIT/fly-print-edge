@@ -168,9 +168,10 @@ class CloudWebSocketClient:
 class PrintJobHandler:
     """打印任务处理器"""
     
-    def __init__(self, printer_manager, api_client):
+    def __init__(self, printer_manager, api_client, websocket_client=None):
         self.printer_manager = printer_manager
         self.api_client = api_client
+        self.websocket_client = websocket_client
     
     def handle_print_job(self, message: Dict[str, Any]):
         """处理打印任务消息"""
@@ -212,7 +213,8 @@ class PrintJobHandler:
             
             if result.get("success"):
                 print(f"✅ [DEBUG] 云端打印任务提交成功: {job_id}")
-                # 可以在这里添加任务完成监控
+                # 启动任务完成监控
+                self._monitor_job_completion(job_id, printer_name, result.get("job_id"))
             else:
                 error_msg = result.get("message", "未知错误")
                 print(f"❌ [DEBUG] 云端打印任务提交失败: {error_msg}")
@@ -271,14 +273,105 @@ class PrintJobHandler:
             print(f"❌ [DEBUG] 下载打印文件异常: {e}")
             return None
     
-    def _report_job_failure(self, job_id: str, error_message: str):
-        """报告任务失败"""
+    def _monitor_job_completion(self, cloud_job_id: str, printer_name: str, local_job_id: str):
+        """监控打印任务完成状态"""
+        import threading
+        import time
+        
+        def monitor():
+            try:
+                if not local_job_id:
+                    # 如果没有本地job_id，延迟后直接报告成功（假设提交成功就是完成）
+                    time.sleep(10)
+                    self._report_job_success(cloud_job_id)
+                    return
+                
+                max_wait_time = 600  # 最大等待10分钟
+                check_interval = 10   # 每10秒检查一次
+                waited_time = 0
+                
+                print(f"🔍 [DEBUG] 开始监控云端任务完成: {cloud_job_id} -> 本地任务: {local_job_id}")
+                
+                while waited_time < max_wait_time:
+                    time.sleep(check_interval)
+                    waited_time += check_interval
+                    
+                    # 检查任务状态
+                    job_status = self.printer_manager.get_job_status(printer_name, local_job_id)
+                    
+                    # 如果任务不存在（完成或失败）或状态为完成，报告成功
+                    if not job_status.get("exists", True):
+                        print(f"✅ [DEBUG] 云端任务完成: {cloud_job_id}")
+                        self._report_job_success(cloud_job_id)
+                        return
+                    elif job_status.get("status") in ["completed", "completed_or_failed"]:
+                        print(f"✅ [DEBUG] 云端任务完成: {cloud_job_id}")
+                        self._report_job_success(cloud_job_id)
+                        return
+                    else:
+                        print(f"🔍 [DEBUG] 云端任务 {cloud_job_id} 仍在处理中，状态: {job_status.get('status', 'unknown')}")
+                
+                # 超时后报告成功（假设长时间运行的任务已完成）
+                print(f"⏰ [DEBUG] 云端任务监控超时，假设已完成: {cloud_job_id}")
+                self._report_job_success(cloud_job_id)
+                
+            except Exception as e:
+                print(f"❌ [DEBUG] 监控云端任务完成异常: {e}")
+                # 异常时也报告成功，避免任务一直处于分发状态
+                self._report_job_success(cloud_job_id)
+        
+        # 在后台线程中监控
+        monitor_thread = threading.Thread(target=monitor, daemon=True)
+        monitor_thread.start()
+    
+    def _report_job_success(self, job_id: str):
+        """通过WebSocket报告任务成功"""
         if job_id:
             try:
-                result = self.api_client.report_print_job_result(job_id, False, error_message)
-                if result.get("success"):
-                    print(f"✅ [DEBUG] 任务失败报告成功: {job_id}")
+                from datetime import datetime, timezone
+                message = {
+                    "type": "job_update",
+                    "node_id": self.api_client.node_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "data": {
+                        "job_id": job_id,
+                        "status": "completed",
+                        "progress": 100,
+                        "error_message": None
+                    }
+                }
+                # 通过现有的WebSocket连接发送
+                print(f"🔍 [DEBUG] WebSocket客户端引用: {self.websocket_client}")
+                if self.websocket_client:
+                    print(f"🔍 [DEBUG] WebSocket运行状态: {self.websocket_client.running}")
+                    self.websocket_client.send_message_sync(message)
+                    print(f"✅ [DEBUG] 任务成功状态已通过WebSocket上报: {job_id}")
                 else:
-                    print(f"❌ [DEBUG] 任务失败报告失败: {result.get('error', '未知错误')}")
+                    print(f"⚠️ [DEBUG] WebSocket连接不可用，无法上报任务状态: {job_id}")
             except Exception as e:
-                print(f"❌ [DEBUG] 报告任务失败异常: {e}")
+                print(f"❌ [DEBUG] 通过WebSocket报告任务成功异常: {e}")
+    
+    def _report_job_failure(self, job_id: str, error_message: str):
+        """通过WebSocket报告任务失败"""
+        if job_id:
+            try:
+                from datetime import datetime, timezone
+                message = {
+                    "type": "job_update",
+                    "node_id": self.api_client.node_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "data": {
+                        "job_id": job_id,
+                        "status": "failed",
+                        "progress": 0,
+                        "error_message": error_message
+                    }
+                }
+                # 通过现有的WebSocket连接发送
+                if self.websocket_client:
+                    self.websocket_client.send_message_sync(message)
+                    print(f"✅ [DEBUG] 任务失败状态已通过WebSocket上报: {job_id}")
+                else:
+                    print(f"⚠️ [DEBUG] WebSocket连接不可用，无法上报任务状态: {job_id}")
+            except Exception as e:
+                print(f"❌ [DEBUG] 通过WebSocket报告任务失败异常: {e}")

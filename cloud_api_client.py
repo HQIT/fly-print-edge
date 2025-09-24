@@ -172,31 +172,4 @@ class CloudAPIClient:
             print(f"❌ [DEBUG] 更新打印机状态异常: {e}")
             return {"success": False, "error": str(e)}
     
-    def report_print_job_result(self, job_id: str, success: bool, error_message: str = None) -> Dict[str, Any]:
-        """报告打印任务结果"""
-        if not self.node_id:
-            return {"success": False, "error": "节点未注册"}
-        
-        try:
-            url = f"{self.base_url}/api/v1/edge/{self.node_id}/jobs/{job_id}/result"
-            headers = self.auth_client.get_auth_headers()
-            
-            data = {
-                "success": success,
-                "timestamp": int(time.time())
-            }
-            
-            if error_message:
-                data["error_message"] = error_message
-            
-            response = requests.post(url, json=data, headers=headers, timeout=5)
-            
-            if response.status_code == 200:
-                return {"success": True, "data": response.json()}
-            else:
-                print(f"❌ [DEBUG] 报告打印任务结果失败: {response.status_code} - {response.text}")
-                return {"success": False, "error": response.text}
-                
-        except Exception as e:
-            print(f"❌ [DEBUG] 报告打印任务结果异常: {e}")
-            return {"success": False, "error": str(e)}
+    # 注意：打印任务状态上报现在通过WebSocket的job_update消息处理，不再使用HTTP API

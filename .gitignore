@@ -30,4 +30,4 @@ pip-delete-this-directory.txt
 .DS_Store
 Thumbs.db
 
-.fly-print-cloud
+_fly-print-cloud

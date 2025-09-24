@@ -65,7 +65,8 @@ class CloudService:
             if self.printer_manager:
                 self.print_job_handler = PrintJobHandler(
                     printer_manager=self.printer_manager,
-                    api_client=self.api_client
+                    api_client=self.api_client,
+                    websocket_client=self.websocket_client
                 )
             
             print("✅ [DEBUG] 云端服务组件初始化完成")
@@ -228,8 +229,9 @@ class CloudService:
             # 初始化WebSocket客户端
             self.websocket_client = CloudWebSocketClient(ws_url, self.auth_client)
             
-            # 添加消息处理器
+            # 更新PrintJobHandler的WebSocket客户端引用
             if self.print_job_handler:
+                self.print_job_handler.websocket_client = self.websocket_client
                 self.websocket_client.add_message_handler("print_job", self.print_job_handler.handle_print_job)
             
             # 启动WebSocket客户端
