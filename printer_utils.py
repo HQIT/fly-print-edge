@@ -363,6 +363,82 @@ class PrinterManager:
         from datetime import datetime
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
+    def submit_print_job_with_cleanup(self, printer_name: str, file_path: str, job_name: str, print_options: Dict[str, str] = None, cleanup_source: str = "unknown") -> Dict[str, Any]:
+        """提交打印任务并智能清理临时文件（统一入口）"""
+        import threading
+        import time
+        import os
+        
+        try:
+            print(f"🖨️ [DEBUG] [{cleanup_source}] 提交打印任务: {job_name}")
+            print(f"  打印机: {printer_name}")
+            print(f"  文件: {file_path}")
+            
+            # 提交打印任务
+            result = self.submit_print_job(printer_name, file_path, job_name, print_options or {})
+            
+            # 智能清理临时文件
+            def smart_cleanup():
+                try:
+                    # 如果提交失败，立即清理
+                    if not result.get("success", False):
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            print(f"🗑️ [DEBUG] [{cleanup_source}] 打印失败，立即清理临时文件: {file_path}")
+                        return
+                    
+                    # 如果有job_id，监控任务状态
+                    job_id = result.get("job_id")
+                    if job_id:
+                        max_wait_time = 300  # 最大等待5分钟
+                        check_interval = 5   # 每5秒检查一次
+                        waited_time = 0
+                        
+                        while waited_time < max_wait_time:
+                            time.sleep(check_interval)
+                            waited_time += check_interval
+                            
+                            # 检查任务状态
+                            job_status = self.get_job_status(printer_name, job_id)
+                            
+                            # 如果任务不存在（完成或失败）或状态为完成，清理文件
+                            if not job_status.get("exists", True) or job_status.get("status") in ["completed", "completed_or_failed"]:
+                                if os.path.exists(file_path):
+                                    os.remove(file_path)
+                                    print(f"🗑️ [DEBUG] [{cleanup_source}] 打印任务完成，清理临时文件: {file_path}")
+                                return
+                        
+                        # 超时后强制清理
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            print(f"🗑️ [DEBUG] [{cleanup_source}] 等待超时，强制清理临时文件: {file_path}")
+                    else:
+                        # 没有job_id，使用短延迟后清理
+                        time.sleep(30)
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            print(f"🗑️ [DEBUG] [{cleanup_source}] 无job_id，延迟清理临时文件: {file_path}")
+                        
+                except Exception as cleanup_error:
+                    print(f"⚠️ [DEBUG] [{cleanup_source}] 智能清理临时文件失败: {cleanup_error}")
+            
+            # 在后台线程中执行智能清理
+            cleanup_thread = threading.Thread(target=smart_cleanup, daemon=True)
+            cleanup_thread.start()
+            
+            return result
+            
+        except Exception as e:
+            print(f"❌ [DEBUG] [{cleanup_source}] 打印任务提交异常: {e}")
+            # 异常时也尝试清理文件
+            try:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                    print(f"🗑️ [DEBUG] [{cleanup_source}] 异常清理临时文件: {file_path}")
+            except:
+                pass
+            return {"success": False, "message": str(e)}
+    
     def get_print_queue_df(self, printer_name: str) -> pd.DataFrame:
         """获取打印队列DataFrame"""
         jobs = self.get_print_queue(printer_name)

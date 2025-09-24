@@ -248,62 +248,14 @@ class PrintApp:
                 if media and media != "默认":
                     print_options["MediaType"] = media
             
-            # 提交打印任务
-            result = self.printer_manager.submit_print_job(
-                printer_name, 
-                temp_file_path, 
+            # 使用统一的打印任务提交方法（自动处理清理）
+            result = self.printer_manager.submit_print_job_with_cleanup(
+                printer_name,
+                temp_file_path,
                 job_name or f"Print_{file_name}",
-                print_options
+                print_options,
+                "Gradio界面"
             )
-            
-            # 智能清理临时文件，基于打印任务状态
-            def smart_cleanup():
-                try:
-                    # 如果提交失败，立即清理
-                    if not result.get("success", False):
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-                            print(f"🗑️ [DEBUG] 打印失败，立即清理临时文件: {temp_file_path}")
-                        return
-                    
-                    # 如果有job_id，监控任务状态
-                    job_id = result.get("job_id")
-                    if job_id:
-                        max_wait_time = 300  # 最大等待5分钟
-                        check_interval = 5   # 每5秒检查一次
-                        waited_time = 0
-                        
-                        while waited_time < max_wait_time:
-                            time.sleep(check_interval)
-                            waited_time += check_interval
-                            
-                            # 检查任务状态
-                            job_status = self.printer_manager.get_job_status(printer_name, job_id)
-                            
-                            # 如果任务不存在（完成或失败）或状态为完成，清理文件
-                            if not job_status.get("exists", True) or job_status.get("status") in ["completed", "completed_or_failed"]:
-                                if os.path.exists(temp_file_path):
-                                    os.remove(temp_file_path)
-                                    print(f"🗑️ [DEBUG] 打印任务完成，清理临时文件: {temp_file_path}")
-                                return
-                        
-                        # 超时后强制清理
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-                            print(f"🗑️ [DEBUG] 等待超时，强制清理临时文件: {temp_file_path}")
-                    else:
-                        # 没有job_id，使用短延迟后清理
-                        time.sleep(30)
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-                            print(f"🗑️ [DEBUG] 无job_id，延迟清理临时文件: {temp_file_path}")
-                        
-                except Exception as cleanup_error:
-                    print(f"⚠️ [DEBUG] 清理临时文件失败: {cleanup_error}")
-            
-            # 在后台线程中执行智能清理
-            cleanup_thread = threading.Thread(target=smart_cleanup, daemon=True)
-            cleanup_thread.start()
             
             return result
             

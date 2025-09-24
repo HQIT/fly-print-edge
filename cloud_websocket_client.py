@@ -172,22 +172,31 @@ class PrintJobHandler:
         self.printer_manager = printer_manager
         self.api_client = api_client
     
-    def handle_print_job(self, data: Dict[str, Any]):
+    def handle_print_job(self, message: Dict[str, Any]):
         """处理打印任务消息"""
         try:
+            # 从WebSocket消息中提取实际的打印任务数据
+            data = message.get("data", {})
+            print(f"🔍 [DEBUG] 完整的WebSocket消息: {message}")
+            print(f"🔍 [DEBUG] 提取的打印任务数据: {data}")
+            
             job_id = data.get("job_id")
             printer_name = data.get("printer_name")
             file_url = data.get("file_url")
-            job_name = data.get("job_name", f"CloudJob_{job_id}")
+            job_name = data.get("name", f"CloudJob_{job_id}")  # 使用name字段作为任务名
             print_options = data.get("print_options", {})
             
             print(f"🖨️ [DEBUG] 处理云端打印任务:")
             print(f"  任务ID: {job_id}")
             print(f"  打印机: {printer_name}")
             print(f"  文件URL: {file_url}")
+            print(f"  任务名称: {job_name}")
             
             if not all([job_id, printer_name, file_url]):
                 print("❌ [DEBUG] 打印任务参数不完整")
+                print(f"  job_id存在: {bool(job_id)}")
+                print(f"  printer_name存在: {bool(printer_name)}")
+                print(f"  file_url存在: {bool(file_url)}")
                 return
             
             # 下载文件
@@ -196,9 +205,9 @@ class PrintJobHandler:
                 self._report_job_failure(job_id, "文件下载失败")
                 return
             
-            # 提交打印任务
-            result = self.printer_manager.submit_print_job(
-                printer_name, file_path, job_name, print_options
+            # 使用统一的打印任务提交方法（自动处理清理）
+            result = self.printer_manager.submit_print_job_with_cleanup(
+                printer_name, file_path, job_name, print_options, "云端WebSocket"
             )
             
             if result.get("success"):
@@ -211,6 +220,7 @@ class PrintJobHandler:
                 
         except Exception as e:
             print(f"❌ [DEBUG] 处理云端打印任务异常: {e}")
+            # 统一方法已经处理了异常清理
             self._report_job_failure(data.get("job_id"), str(e))
     
     def _download_print_file(self, file_url: str, job_id: str) -> Optional[str]:
@@ -222,15 +232,31 @@ class PrintJobHandler:
             
             print(f"📥 [DEBUG] 下载打印文件: {file_url}")
             
-            # 获取认证头
-            headers = self.api_client.auth_client.get_auth_headers()
+            # S3签名URL不能带认证头，检查是否为签名URL
+            headers = {}
+            if 'X-Amz-Algorithm' in file_url and 'X-Amz-Signature' in file_url:
+                # 这是S3签名URL，不需要认证头
+                print(f"🔗 [DEBUG] 检测到S3签名URL，直接下载")
+            else:
+                # 普通URL需要认证头
+                headers = self.api_client.auth_client.get_auth_headers()
+                print(f"🔐 [DEBUG] 使用认证头下载文件")
             
             response = requests.get(file_url, headers=headers, timeout=30)
+            print(f"📊 [DEBUG] 下载响应状态: {response.status_code}")
+            if response.status_code != 200:
+                print(f"📊 [DEBUG] 响应内容: {response.text[:500]}")  # 打印前500字符的错误信息
             if response.status_code == 200:
                 # 保存到临时文件
                 temp_dir = tempfile.gettempdir()
-                file_extension = os.path.splitext(file_url)[1] or '.pdf'
-                temp_file_path = os.path.join(temp_dir, f"cloud_job_{job_id}{file_extension}")
+                # 从URL路径中提取原始文件名，忽略查询参数
+                from urllib.parse import urlparse
+                parsed_url = urlparse(file_url)
+                original_filename = os.path.basename(parsed_url.path)
+                # 如果无法提取文件名，使用job_id作为备用
+                if not original_filename or '.' not in original_filename:
+                    original_filename = f"cloud_job_{job_id}.pdf"
+                temp_file_path = os.path.join(temp_dir, original_filename)
                 
                 with open(temp_file_path, 'wb') as f:
                     f.write(response.content)
@@ -248,4 +274,11 @@ class PrintJobHandler:
     def _report_job_failure(self, job_id: str, error_message: str):
         """报告任务失败"""
         if job_id:
-            self.api_client.report_print_job_result(job_id, False, error_message)
+            try:
+                result = self.api_client.report_print_job_result(job_id, False, error_message)
+                if result.get("success"):
+                    print(f"✅ [DEBUG] 任务失败报告成功: {job_id}")
+                else:
+                    print(f"❌ [DEBUG] 任务失败报告失败: {result.get('error', '未知错误')}")
+            except Exception as e:
+                print(f"❌ [DEBUG] 报告任务失败异常: {e}")
